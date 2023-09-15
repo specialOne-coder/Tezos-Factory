@@ -1,0 +1,21 @@
+#import "generic_fa2/core/NFT.mligo" "NFT_FA2"
+
+export type generateCollectionParam = {
+    name : string,
+    tokenIds : list<nat>,
+    tokenMetas : NFT_FA2.NFT.TokenMetadata.t
+};
+
+export type AdminParam = {
+    newAdmin : address
+};
+
+
+export type t =
+    ["GenerateCollection", generateCollectionParam]
+    | ["ProposeAdmin", AdminParam]
+    | ["DecideAdmin"]
+    | ["DeleteAdmin", AdminParam]
+    | ["BlacklistCreator", AdminParam]
+    | ["Participate"]
+    | ["Nothing"];

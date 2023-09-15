@@ -1,0 +1,161 @@
+#import "storage.jsligo" "Storage"
+#import "parameter.jsligo" "Parameter"
+#import "generic_fa2/core/NFT.mligo" "NFT_FA2"
+
+export type storage = Storage.t;
+export type parameter = Parameter.t;
+export type return_ = [list<operation>, storage];
+
+type store = NFT_FA2.Storage.t;
+type ext = NFT_FA2.extension;
+type extStorage = store<ext>;
+
+const generateCollection = (param: Parameter.generateCollectionParam, store: Storage.t) : return_ => {
+    // create new collection
+    let is_creator: bool = Big_map.mem(Tezos.get_sender (), store.creators); // need to be whitelisted
+     if (!is_creator) {
+      return failwith("YOU_ARE_NOT_CREATOR")
+     }
+    let tokenIds = param.tokenIds;
+    let ledger = (Big_map.empty as NFT_FA2.Storage.Ledger.t);
+    let myfunc = ([acc, elt] : [NFT_FA2.Storage.Ledger.t, nat]) : NFT_FA2.Storage.Ledger.t => Big_map.add(elt, Tezos.get_sender (), acc);
+    let newLedger : NFT_FA2.Storage.Ledger.t = List.fold(myfunc, tokenIds, ledger);
+
+    let tokenUsage = (Big_map.empty as NFT_FA2.TokenUsage.t);
+    let initialUsage = ([acc, elt] : [NFT_FA2.TokenUsage.t, nat]) : NFT_FA2.TokenUsage.t => Big_map.add(elt, (0 as nat), acc);
+    let newTokenUsage = List.fold(initialUsage, tokenIds, tokenUsage);
+
+    let tokenMetadata = param.tokenMetas;
+    let operators = (Big_map.empty as NFT_FA2.Storage.Operators.t);
+    
+
+    let initialStorage : extStorage = {
+        ledger:newLedger,
+        operators:operators,
+        token_ids:tokenIds,
+        token_metadata:tokenMetadata,
+        extension : {
+          admin:Tezos.get_sender (),
+          token_usage:newTokenUsage,
+        }
+    };
+
+    let initialDelegate : option<key_hash> = (None() as option<key_hash>);
+    let initialAmount : tez = 1 as tez;
+    let createMyContract = (p: [option<key_hash>, tez, extStorage]) : [operation, address] =>
+      (Michelson `{ 
+            UNPAIR ;
+            UNPAIR ;
+            CREATE_CONTRACT 
+#include "generic_fa2/compiled/fa2_nft.tz"  
+               ;
+            PAIR }`
+            as ((p: [option<key_hash>, tez, extStorage]) => [operation, address]) )(p)
+   ;
+
+    // store.admin = [Tezos.get_sender (), ...store.admin];
+    let originate : [operation, address] = createMyContract([initialDelegate, initialAmount, initialStorage]);
+    // insert into collections
+    let newAllCollections = Big_map.add(originate[1], Tezos.get_sender (), store.allCollections);
+    // insert into ownedCollections
+    let newOwnedCollections = match(Big_map.find_opt(Tezos.get_sender (), store.ownedCollections), {
+      None: () => Big_map.add( Tezos.get_sender (), (list([originate[1]]) as list<address>), store.ownedCollections),
+      Some: (addrLst: list<address>) => Big_map.update( Tezos.get_sender (), (Some( list([originate[1], ...addrLst]) )), store.ownedCollections)
+    });
+    return [list([originate[0]]), { ...store, allCollections:newAllCollections, ownedCollections:newOwnedCollections}];
+};
+
+const proposeAdmin = (param: Parameter.AdminParam, store: Storage.t) : return_ => {
+  let is_added: bool = Big_map.mem(Tezos.get_sender (), store.admins);
+  if (!is_added) {
+    return failwith("YOU_ARE_NOT_ADMIN")
+  }
+  let is_accepted: option <bool> = Big_map.find_opt(Tezos.get_sender (), store.admins);
+  if (is_accepted != Some(true)) {
+    return failwith("ADMIN_NEED_TO_BE_ACCEPTED");
+  }
+  let exist_admin : bool = Big_map.mem(param.newAdmin, store.admins);
+  if (!exist_admin) {
+    return failwith("ALREADY_ADMIN");
+  }
+  const newAdmins = Big_map.add(param.newAdmin, false, store.admins);
+  return [list([]), { ...store, admins: newAdmins}];
+}
+
+const removeAdmin = (param: Parameter.AdminParam, store: Storage.t) : return_ => {
+  let is_added: bool = Big_map.mem(Tezos.get_sender (), store.admins);
+  if (!is_added) {
+    return failwith("YOU_ARE_NOT_ADMIN");
+  }
+  let is_accepted: option <bool> = Big_map.find_opt(Tezos.get_sender (), store.admins);
+  if (is_accepted != Some(true)) {
+    return failwith("ADMIN_NEED_TO_BE_ACCEPTED");
+  }
+  let exist_admin : bool = Big_map.mem(param.newAdmin, store.admins);
+  if (!exist_admin) {
+    return failwith("ALREADY_ADMIN");
+  }
+  const newAdmins = Big_map.remove(param.newAdmin, store.admins);
+  return [list([]), { ...store, admins: newAdmins}];
+}
+
+const decideAdmin = (store: Storage.t) : return_ => {
+  let is_added: bool = Big_map.mem(Tezos.get_sender (), store.admins);
+  if (!is_added) {
+    return failwith("YOU_ARE_NOT_ADDED");
+  }
+  const newAdmins = Big_map.update(Tezos.get_sender (), Some(true), store.admins);
+  return [list([]), { ...store, admins: newAdmins}];
+}
+
+const blacklistCreator = (param: Parameter.AdminParam, store: Storage.t) : return_ => {
+  let is_added: bool = Big_map.mem(Tezos.get_sender (), store.admins);
+  if (!is_added) {
+    return failwith("YOU_ARE_NOT_ADMIN")
+  }
+  let is_accepted: option <bool> = Big_map.find_opt(Tezos.get_sender (), store.admins);
+  if (is_accepted != Some(true)) {
+    return failwith("ADMIN_NEED_TO_BE_ACCEPTED");
+  }
+  let rm = store.creators;
+  let is_creator: bool = Big_map.mem(Tezos.get_sender (), store.creators);
+  if (is_creator) {
+    rm = Big_map.remove(param.newAdmin, store.creators);
+  }
+  const bcreator = Big_map.add(param.newAdmin, true, store.blacklisted);
+  return [list([]), { ...store, blacklisted: bcreator, creators:rm }];
+}
+
+const participate = (store:Storage.t) : return_ => {
+  
+  let initialAmount : tez = 10 as tez;
+  if (Tezos.get_amount() < initialAmount){
+     return failwith("YOU_NEED_10TZ_TO_BECOME_CREATOR");
+  }
+  const creator = Big_map.add(Tezos.get_sender (), true, store.creators);
+  return [list([]), { ...store, creators: creator}];
+}
+
+
+
+
+export const main = (ep: parameter, store: storage) : return_ =>
+    match(ep, { 
+      GenerateCollection: (p: Parameter.generateCollectionParam) => generateCollection(p, store),
+      ProposeAdmin: (p: Parameter.AdminParam) => proposeAdmin(p, store),
+      DecideAdmin: () => decideAdmin(store),
+      DeleteAdmin: (p: Parameter.AdminParam) => removeAdmin(p, store),
+      BlacklistCreator: (p: Parameter.AdminParam) => blacklistCreator(p, store),
+      Participate: () => participate(store),
+      Nothing: () => [(list([]) as list<operation>), store]
+    });
+
+@view
+const userCollection = ([p, s]: [address, storage]): list<address> => {
+   let userContracts: list<address> = match(Big_map.find_opt(p, s.ownedCollections), {
+      None: () => list([]),
+      Some: (addrLst: list<address>) => addrLst
+    });
+   return userContracts;
+};
+

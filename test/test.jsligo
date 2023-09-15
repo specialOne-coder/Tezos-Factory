@@ -1,0 +1,395 @@
+
+#import "../src/main.jsligo" "Factory"
+
+type fa2Storage = Factory.NFT_FA2.Storage.t;
+type ext = Factory.NFT_FA2.extension;
+type extFa2Storage = fa2Storage<ext>;
+
+const assertStringFailure = (res: test_exec_result, expected_error: string): unit => {
+    const expected_error2 = Test.eval(expected_error);
+    match(res, {
+        Fail: (x: test_exec_error) => (
+        match (x, {
+            Rejected: (x: [michelson_program, address]) => assert(Test.michelson_equal(x[0], expected_error2)),
+            Balance_too_low : (_ : test_exec_error_balance_too_low) =>  failwith("contract failed: balance too low"),
+            Other: (s: string) => failwith(s)
+        })),
+        Success: (_ : nat) => failwith("Expected to fail but passed")
+    });
+};
+
+const test = () : unit => {
+    // setup 4 accounts 
+    let _ = Test.reset_state(4 as nat, (list([]) as list<tez>));
+    const alice: address = Test.nth_bootstrap_account(0);
+    const bob: address = Test.nth_bootstrap_account(1);
+    const steven: address = Test.nth_bootstrap_account(2);
+    const _frank: address = Test.nth_bootstrap_account(3);
+
+    // originate Factory smart contract
+    let initStorage : Factory.Storage.t = { 
+        allCollections:(Big_map.empty as big_map<Factory.Storage.collectionContract, Factory.Storage.collectionOwner>),
+        ownedCollections:(Big_map.empty as big_map<Factory.Storage.collectionOwner, list<Factory.Storage.collectionContract>> ),
+        metadata: (Big_map.empty as big_map<string, bytes>),
+        admins: (Big_map.empty as big_map<address, bool>),
+        blacklisted: (Big_map.empty as big_map<address, bool>),
+        creators: (Big_map.empty as big_map<address, bool>),
+    };
+    const [addr,_,_] = Test.originate(Factory.main, initStorage, 0 as tez);
+
+    let _add_admin_should_fail = () : unit => {
+        let _print = Test.log("1 - Add admin should fail");
+        let x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        // call Add Admin entrypoint
+        let addArgs : Factory.Parameter.AdminParam = {newAdmin:alice};
+        let proposeAdmin = Test.transfer_to_contract(x, (ProposeAdmin(addArgs)), (0 as mutez));
+        assertStringFailure( proposeAdmin, "YOU_ARE_NOT_ADMIN");
+        Test.log("---------------------------");
+    };
+
+    let _remove_admin_should_fail = () : unit => {
+        let _print = Test.log("2 - Remove admin should fail");
+        let x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        // call Add Admin entrypoint
+        let addArgs : Factory.Parameter.AdminParam = {newAdmin:alice};
+        let proposeAdmin = Test.transfer_to_contract(x, (DeleteAdmin(addArgs)), (0 as mutez));
+        assertStringFailure( proposeAdmin, "YOU_ARE_NOT_ADMIN");
+        Test.log("---------------------------");
+    };
+
+    let _accept_admin_should_fail = () : unit => {
+        let _print = Test.log("3 - Accept admin role should fail");
+        let x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        // call Add Admin entrypoint
+        let proposeAdmin = Test.transfer_to_contract(x, (DecideAdmin()), (0 as mutez));
+        assertStringFailure( proposeAdmin, "YOU_ARE_NOT_ADDED");
+        Test.log("---------------------------");
+    };
+
+    let _blacklist_creator_should_fail = () : unit => {
+        let _print = Test.log("4 - Blacklist creator should should fail");
+        let x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        // call Add Admin entrypoint
+        let addArgs : Factory.Parameter.AdminParam = {newAdmin:alice};
+        let proposeAdmin = Test.transfer_to_contract(x, (BlacklistCreator(addArgs)), (0 as mutez));
+        assertStringFailure( proposeAdmin, "YOU_ARE_NOT_ADMIN");
+        Test.log("---------------------------");
+    };
+
+     let _participate_contract_should_fail = () : unit => {
+        let _print = Test.log("5 - Participate with 10 tz should fail");
+        let x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        // call Add Admin entrypoint
+        let proposeAdmin = Test.transfer_to_contract(x, (Participate()), (0 as mutez));
+        assertStringFailure( proposeAdmin, "YOU_NEED_10TZ_TO_BECOME_CREATOR");
+        Test.log("---------------------------");
+    };
+
+    let _participate_contract_should_success = () : unit => {
+        let _print = Test.log("6 - Participate with 10 tz should success");
+        let x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        // call Add Admin entrypoint
+        let _ = Test.transfer_to_contract_exn(x, (Participate()), (10000000 as mutez));
+        Test.log("---------------------------");
+    };
+
+     let _generates_collection_1_should_fail = () : unit => {
+        let _print = Test.log("7 - Generate collection should fail");
+
+        let x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        // prepare arguments for generating a new collection
+        let tokenIds : list<nat> = list([(1 as nat)]);
+        let tokenInfo1 : map<string, bytes> = Map.literal( list([
+            ["QRcode", 0x623d82eff132] 
+        ]));
+        //let tokenInfo1Data : Factory.NFT_FA2.NFT.TokenMetadata.data = { token_id: (1 as nat), token_info: tokenInfo1 };
+        let tokenMetadata : Factory.NFT_FA2.NFT.TokenMetadata.t = Big_map.literal( list([
+            [1 as nat, { token_id: (1 as nat), token_info: tokenInfo1 }]
+        ]));
+
+        // participate before
+        let _src = Test.set_source(alice);
+
+        // call GenerateCollection entrypoint
+        let gencolArgs : Factory.Parameter.generateCollectionParam = {name:"alice_collection_1", tokenIds:tokenIds, tokenMetas:tokenMetadata};
+        let generate = Test.transfer_to_contract(x, (GenerateCollection(gencolArgs)), (1000000 as mutez));
+
+        // verify FA2 creation has been fail
+        assertStringFailure( generate, "YOU_ARE_NOT_CREATOR");
+        Test.log("---------------------------");
+    };
+
+    let _generates_collection_1_should_works = () : unit => {
+        let _print = Test.log("8 - Generate collection should success");
+
+        let x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        // prepare arguments for generating a new collection
+        let tokenIds : list<nat> = list([(1 as nat)]);
+        let tokenInfo1 : map<string, bytes> = Map.literal( list([
+            ["QRcode", 0x623d82eff132] 
+        ]));
+        //let tokenInfo1Data : Factory.NFT_FA2.NFT.TokenMetadata.data = { token_id: (1 as nat), token_info: tokenInfo1 };
+        let tokenMetadata : Factory.NFT_FA2.NFT.TokenMetadata.t = Big_map.literal( list([
+            [1 as nat, { token_id: (1 as nat), token_info: tokenInfo1 }]
+        ]));
+
+        // participate before
+        let _src = Test.set_source(alice);
+        let _ = Test.transfer_to_contract_exn(x, (Participate()), (10000000 as mutez));
+
+        // call GenerateCollection entrypoint
+        let gencolArgs : Factory.Parameter.generateCollectionParam = {name:"alice_collection_1", tokenIds:tokenIds, tokenMetas:tokenMetadata};
+        let _ = Test.transfer_to_contract_exn(x, (GenerateCollection(gencolArgs)), (1000000 as mutez));
+
+        // verify FA2 has been created
+        let s : Factory.storage = Test.get_storage(addr);
+        let colls : list<address> = match(Big_map.find_opt(alice, s.ownedCollections), {
+            None: () => (list([]) as list<address>),
+            Some: (x: list<address>) => x
+        });
+        let ownedCollSize = List.fold( (([acc, _elt] : [nat, address]) : nat => acc + (1 as nat)), colls, (0 as nat));
+        //let ownedCollSize : nat = Set.size colls in 
+        assert (ownedCollSize == (1 as nat));
+        Test.log("---------------------------");
+    };
+   
+    let _mint_token2_collection_1_should_works = () : string => {
+        let _testname = Test.log("9 - Mint token 2 in  collection 1 should work");
+        //let x : Factory.parameter contract = Test.to_contract addr;
+
+        // Retrieve address of collection 1
+        let sBefore : Factory.storage = Test.get_storage(addr);
+        let collsBefore : list<address> = match(Big_map.find_opt(alice, sBefore.ownedCollections), {
+            None: () => (list([]) as list<address>),
+            Some: (oc: list<address>) => oc
+        });
+        //let collsBeforeList : address list = Set.fold (fun(acc, i : address list * address) -> i :: acc) collsBefore ([] : address list);
+        let address1 : address = Option.unopt (List.head_opt(collsBefore));
+
+        // prepare mint arguments
+        //let () = Test.log("alice mint token 2 in collection 1");
+        let extraTokenId : nat = (2 as nat);
+        let extraTokenIds : list<nat> = list([extraTokenId]);
+        let extraTokenInfo : map<string, bytes> = Map.literal( list([ ["QRcode", 0x6269c0f1a821] ]));
+        let extraTokenMetadata : big_map<nat, map<string, bytes> > = Big_map.literal( list([ [extraTokenId, extraTokenInfo] ]));
+
+        // call MINT
+        let _src = Test.set_source(alice);
+        let taddr1 = (Test.cast_address(address1) as typed_address<Factory.NFT_FA2.parameter, extFa2Storage> );
+        let fa21 : contract<Factory.NFT_FA2.parameter> = Test.to_contract(taddr1);
+        let mintArgs : Factory.NFT_FA2.mint_param = { ids:extraTokenIds, metas:extraTokenMetadata };
+        let _ = Test.transfer_to_contract_exn(fa21, (Mint(mintArgs)), (0 as mutez));
+
+        // verify token2 is created and owned by alice
+        //let () = Test.log("check new token 2");
+        let fa21S : extFa2Storage = Test.get_storage(taddr1);
+        let _tst = assert( (Factory.NFT_FA2.Storage.is_owner_of(fa21S)(alice))(2 as nat) );
+        Test.log("---------------------------");
+        return "OK"
+    };
+
+    let _mint_token3_collection_1_should_fail = () : unit => {
+        let _testname = Test.log("10 - Mint token3 to collection 1 should fail ");
+        let _x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        // Retrieve address of collection 1
+        let sBefore : Factory.storage = Test.get_storage(addr);
+        let collsBefore : list<address> = match(Big_map.find_opt(alice, sBefore.ownedCollections), {
+            None: () => (list([]) as list<address>),
+            Some: (oc: list<address>) => oc
+        });
+        //let collsBeforeList : address list = Set.fold (fun(acc, i : address list * address) -> i :: acc) collsBefore ([] : address list);
+        let address1 : address = Option.unopt (List.head_opt(collsBefore));
+
+        // prepare mint arguments
+        //let () = Test.log("alice mint token 3 in collection 1");
+        let extraTokenId : nat = (3 as nat);
+        let extraTokenQrcode : bytes = 0x92a77bf1a4c5;
+        let extraTokenIds : list<nat> = list([extraTokenId]);
+        let extraTokenInfo : map<string, bytes> = Map.literal( list([ ["QRcode", extraTokenQrcode] ]));
+        let extraTokenMetadata : big_map<nat, map<string, bytes>> = Big_map.literal( list([ [extraTokenId, extraTokenInfo] ]));
+
+        // call MINT
+        let _src = Test.set_source(bob);
+        let taddr1 = (Test.cast_address(address1) as typed_address<Factory.NFT_FA2.parameter, extFa2Storage>);
+        let fa21 : contract<Factory.NFT_FA2.parameter> = Test.to_contract(taddr1);
+        let mintArgs : Factory.NFT_FA2.mint_param = { ids:extraTokenIds, metas:extraTokenMetadata };
+        let failMintToken3 = Test.transfer_to_contract(fa21, (Mint(mintArgs)), 0 as mutez);
+        assertStringFailure( failMintToken3, Factory.NFT_FA2.Errors.only_admin);
+        Test.log("---------------------------");
+    };
+
+    let _generates_collection_2_with_5_tokens_should_works = () : string => {
+        let _print = Test.log("11- - Generate collection 2 with 5 tokens should works");
+        // check existing collections
+        let sBefore : Factory.storage = Test.get_storage(addr);
+        let collsBefore : list<address> = match(Big_map.find_opt(alice, sBefore.ownedCollections), {
+            None: () => (list([]) as list<address>),
+            Some: (x: list<address>) => x
+        });
+        //let collsBeforeList : address list = Set.fold (fun(acc, i : address list * address) -> i :: acc) collsBefore ([] : address list);
+        let address1 : address = Option.unopt (List.head_opt(collsBefore));
+
+        let x : contract<Factory.parameter> = Test.to_contract(addr);
+
+        //let () = Test.log("alice generates a collection 2");
+        let _src = Test.set_source(alice);
+ 
+        // set new collection 2
+        let tokenIds : list<nat> = list([(1 as nat), (2 as nat), (3 as nat), (4 as nat), (5 as nat)]);
+
+        // add specific metadata for each token
+        let tokenInfo1 : map<string, bytes> = Map.literal( list([ ["QRcode", 0x623d82eff132] ]));
+        let tokenInfo2 : map<string, bytes> = Map.literal( list([ ["QRcode", 0x49aa82eff132] ]));
+        let tokenInfo3 : map<string, bytes> = Map.literal( list([ ["QRcode", 0xab3442eff132] ]));
+        let tokenInfo4 : map<string, bytes> = Map.literal( list([ ["QRcode", 0xdeadbeefdead] ]));
+        let tokenInfo5 : map<string, bytes> = Map.literal( list([ ["QRcode", 0xdeadbeefbeef] ]));
+
+        let tokenMetadata : Factory.NFT_FA2.NFT.TokenMetadata.t = Big_map.literal( list([
+            [(1 as nat), { token_id:(1 as nat), token_info:tokenInfo1 } ],
+            [(2 as nat), { token_id:(2 as nat), token_info:tokenInfo2 } ],
+            [(3 as nat), { token_id:(3 as nat), token_info:tokenInfo3 } ],
+            [(4 as nat), { token_id:(4 as nat), token_info:tokenInfo4 } ],
+            [(5 as nat), { token_id:(5 as nat), token_info:tokenInfo5 } ]
+        ]));
+
+        // add global metadatas to all tokens
+        let collectionNameBytes : bytes = Bytes.pack("Pietrus 2022");
+        let globalMetadatas : map<string, bytes> = Map.literal( list([ ["collection", collectionNameBytes] ])); 
+        let newTokenMetadata = ((Factory.NFT_FA2.NFT.TokenMetadata.add_global_metadata(tokenIds))(tokenMetadata))(globalMetadatas);
+
+        // generate collection
+        let gencolArgs : Factory.Parameter.generateCollectionParam = {name:"alice_collection_1", tokenIds:tokenIds, tokenMetas:newTokenMetadata};
+        let _ = Test.transfer_to_contract_exn(x, (GenerateCollection(gencolArgs)), 1000000 as mutez);
+
+        let s : Factory.storage = Test.get_storage(addr);
+        // verify number of collections
+        let colls : list<address> = match(Big_map.find_opt(alice, s.ownedCollections), {
+            None: () => (list([]) as list<address>),
+            Some: (x: list<address>) => x
+        });
+        //let ownedCollSize : nat = Set.size colls in 
+        let ownedCollSize = List.fold( ( ([acc, _elt] : [nat, address]) : nat => acc + (1 as nat)), colls, (0 as nat));
+        let _tst = assert (ownedCollSize == (2 as nat));
+
+        let parseMetas = ([acc, elt] : [big_map<address, [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t]>, address]) : big_map<address, [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t]> => { 
+            let taddr = (Test.cast_address(elt) as typed_address<Factory.NFT_FA2.parameter, extFa2Storage>);
+            let fa2Store : extFa2Storage = Test.get_storage(taddr);
+            return Big_map.add(elt, [fa2Store.token_ids, fa2Store.token_metadata], acc);
+        };
+        let allTokens : big_map<address, [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t]> = List.fold(parseMetas, colls, (Big_map.empty as big_map<address, [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t]>) ); 
+        
+        // Retrieve collection 2 address
+        //let colls_list : list<address> = Set.fold( ( ([acc, i] : [list<address>, address]) => [i, ...acc]), colls, (list([]) as list<address>));
+        // find address of collection 2
+        let getNextAddress = (lst: list<address>, blacklist: list<address>) : address => {
+            let filter = ([acc, elt] : [[list<address>, list<address>], address]) : [list<address>, list<address>] => { 
+                let isInList = ([res, i] : [[bool, address], address]) : [bool, address] => { if (res[0]) { return res } else { return [(i == res[1]), res[1]] } };
+                let [isBlacklisted, _] = List.fold(isInList, acc[1], [false, elt]);
+                if (isBlacklisted) { return acc } else { return [ list([elt, ...acc[0]]), acc[1]] }
+            };
+            let [filteredList, _] = List.fold(filter, lst, [(list([]) as list<address>), blacklist]);
+            return Option.unopt (List.head_opt(filteredList))
+        };
+        let address2 : address = getNextAddress(colls, collsBefore);
+
+        // verify tokenIds of collection 1
+        let collection1Info : [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t] = match(Big_map.find_opt(address1, allTokens), {
+            None: () => (failwith("No metadata for collection 1") as [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t]),
+            Some: (info: [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t]) => info
+        });
+        assert( collection1Info[0] == list([(2 as nat), (1 as nat)]) );
+        // verify tokenIds of collection 2 
+        let collection2Info : [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t] = match(Big_map.find_opt(address2, allTokens), {
+            None: () => (failwith("No metadata for collection 2") as [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t]),
+            Some: (info: [list<nat>, Factory.NFT_FA2.NFT.TokenMetadata.t]) => info
+        });
+        assert( collection2Info[0] == list([(1 as nat), (2 as nat), (3 as nat), (4 as nat), (5 as nat)]) );
+        // verify metadata of token 3 of collection 2
+        let collection2Metas : Factory.NFT_FA2.NFT.TokenMetadata.t = collection2Info[1];
+        let collection2MetasTok3 : Factory.NFT_FA2.NFT.TokenMetadata.data = match(Big_map.find_opt((3 as nat), collection2Metas), {
+            None: () => (failwith("No token 3 in this collection") as Factory.NFT_FA2.NFT.TokenMetadata.data),
+            Some: (info: Factory.NFT_FA2.NFT.TokenMetadata.data) => info
+        });
+        assert(collection2MetasTok3.token_info == (Map.literal( list([ ["QRcode", 0xab3442eff132], ["collection", collectionNameBytes] ])) as map<string, bytes>));
+        // verify metadata of token 4 of collection 2
+        let collection2MetasTok4 : Factory.NFT_FA2.NFT.TokenMetadata.data = match(Big_map.find_opt((4 as nat), collection2Metas), {
+            None: () => (failwith("No token 4 in this collection") as Factory.NFT_FA2.NFT.TokenMetadata.data),
+            Some: (info: Factory.NFT_FA2.NFT.TokenMetadata.data) => info
+        });
+        assert(collection2MetasTok4.token_info == (Map.literal( list([ ["QRcode", 0xdeadbeefdead], ["collection", collectionNameBytes] ])) as map<string, bytes>));
+        Test.log("---------------------------");
+        return "OK" 
+    };
+
+    let _transfer_token1_collection_2_should_works = () : string => {
+        let _print = Test.log("12 - Transfer token1_collection_2 should works");
+        // retrieve address collection 2
+        let sBefore : Factory.storage = Test.get_storage(addr);
+        let collsBefore : list<address> = match(Big_map.find_opt(alice, sBefore.ownedCollections), {
+            None: () => (list([]) as list<address>),
+            Some: (x: list<address>) => x
+        });
+        let address2 : address = Option.unopt (List.head_opt(collsBefore));
+
+        let taddr2 = (Test.cast_address(address2) as typed_address<Factory.NFT_FA2.parameter, extFa2Storage> );
+        {
+          let _src = Test.set_source(alice);
+          _print = Test.log("alice transfer tok 1 to bob");
+          let fa22 : contract<Factory.NFT_FA2.parameter> = Test.to_contract(taddr2);
+          let transfer1Args : Factory.NFT_FA2.NFT.transfer = list([{ from_:alice, tx: list([{to_:bob, token_id:(1 as nat)}]) }]);
+          let _exec = Test.transfer_to_contract_exn(fa22, (Transfer(transfer1Args)), 0 as mutez);
+
+          let fa22S : extFa2Storage = Test.get_storage(taddr2);
+          assert( (((Factory.NFT_FA2.Storage.is_owner_of(fa22S))(bob))(1 as nat)) );
+          assert( ((Factory.NFT_FA2.get_usage_of(fa22S))(1 as nat)) == (1 as nat) );
+          assert( (((Factory.NFT_FA2.Storage.is_owner_of(fa22S))(alice))(2 as nat)) ); 
+          assert( ((Factory.NFT_FA2.get_usage_of(fa22S))(2 as nat)) == (0 as nat) );
+          assert( (((Factory.NFT_FA2.Storage.is_owner_of(fa22S))(alice))(3 as nat)) );
+          assert( ((Factory.NFT_FA2.get_usage_of(fa22S))(3 as nat)) == (0 as nat) );
+          assert( (((Factory.NFT_FA2.Storage.is_owner_of(fa22S))(alice))(4 as nat)) );
+          assert( ((Factory.NFT_FA2.get_usage_of(fa22S))(4 as nat)) == (0 as nat) );
+          assert( (((Factory.NFT_FA2.Storage.is_owner_of(fa22S))(alice))(5 as nat)) );
+          assert( ((Factory.NFT_FA2.get_usage_of(fa22S))(5 as nat)) == (0 as nat) );
+        };
+        Test.log("---------------------------");
+        _print = Test.log("bob transfer tok 1 to steven");
+        {
+        let _src = Test.set_source(bob);
+        let fa22 : contract<Factory.NFT_FA2.parameter> = Test.to_contract(taddr2);
+        let transfer1Args : Factory.NFT_FA2.NFT.transfer = list([{ from_:bob, tx:list([{to_:steven, token_id:(1 as nat)}]) }]);
+        let _exec = Test.transfer_to_contract_exn(fa22, (Transfer(transfer1Args)), 0 as mutez);
+
+        let fa22SAfter : extFa2Storage = Test.get_storage(taddr2);
+        assert( (((Factory.NFT_FA2.Storage.is_owner_of(fa22SAfter))(steven))(1 as nat)) );
+        assert( ((Factory.NFT_FA2.get_usage_of(fa22SAfter))(1 as nat)) == (2 as nat) );
+        };
+        Test.log("---------------------------");
+        return "OK" 
+    };
+    
+    // execution
+    const _test_add_admin_1_should_fail = _add_admin_should_fail();
+    const _test_remove_admin_1_should_fail = _remove_admin_should_fail();
+    const _test_accept_admin_1_should_fail = _accept_admin_should_fail();
+    const _test_blacklist_creator_1_should_fail = _blacklist_creator_should_fail();
+    const _test_participate_creator_1_should_fail = _participate_contract_should_fail();
+    const _test_participate_creator_1_should_work = _participate_contract_should_success();
+    const _test_generates_collection_1_should_fail = _generates_collection_1_should_fail();
+    const _test_generates_collection_1_should_works = _generates_collection_1_should_works();
+    const _test_mint_token2_collection_1_should_works = _mint_token2_collection_1_should_works();
+    const _test_mint_token3_collection_1_should_fail = _mint_token3_collection_1_should_fail();
+    const _test_generates_collection_2_with_5_tokens_should_works = _generates_collection_2_with_5_tokens_should_works();
+    const _test_transfer_token1_collection_2_should_works = _transfer_token1_collection_2_should_works();
+};
+
+
+const test_1 = test();

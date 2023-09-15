@@ -1,0 +1,19 @@
+{
+    "name": "NFT Factory",
+    "description": "ESGI test",
+    "version": "1.0.0",
+    "license": {
+        "name": "MIT"
+    },
+    "authors": [
+        "frd"
+    ],
+    "homepage": "",
+    "source": {
+        "tools": "jsligo",
+        "location": ""
+    },
+    "interfaces": [
+        "TZIP-016"
+    ]
+}

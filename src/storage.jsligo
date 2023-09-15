@@ -1,0 +1,15 @@
+export type collectionContract = address;
+export type collectionOwner = address;
+export type Admins = list<address>;
+
+export type t = {
+    allCollections : big_map<collectionContract, collectionOwner>,
+    ownedCollections : big_map<collectionOwner, list<collectionContract> >,
+    metadata: big_map<string, bytes>,
+    admins: big_map<address,bool>, //(* bool is if the admin is accepted or not *)
+    blacklisted : big_map<address,bool>, //(* bool is if the creator is blacklisted or not *)
+    creators: big_map<address,bool> //(* bool is if the creator whitelisted *)
+};
+
+
+
